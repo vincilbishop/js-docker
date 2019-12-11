@@ -6,17 +6,17 @@
 
 # This script sets up and runs JasperReports Server on container start.
 # Default "run" command, set in Dockerfile, executes run_jasperserver.
-# If webapps/jasperserver-pro does not exist, run_jasperserver 
+# If webapps/jasperserver does not exist, run_jasperserver
 # redeploys webapp. If "jasperserver" database does not exist,
 # run_jasperserver redeploys minimal database.
-# Additional "init" only calls init_database, which will try to recreate 
+# Additional "init" only calls init_database, which will try to recreate
 # database and fail if DB exists.
 
 # Sets script to fail if any command fails.
 set -e
 
 BUILDOMATIC_HOME=${BUILDOMATIC_HOME:-/usr/src/jasperreports-server/buildomatic}
-MOUNTS_HOME=${MOUNTS_HOME:-/usr/local/share/jasperserver-pro}
+MOUNTS_HOME=${MOUNTS_HOME:-/usr/local/share/jasperserver}
 
 initialize_deploy_properties() {
   # If environment is not set, uses default values for postgres
@@ -39,7 +39,7 @@ dbPassword=$DB_PASSWORD
 js.dbName=$DB_NAME
 foodmart.dbName=foodmart
 sugarcrm.dbName=sugarcrm
-webAppName=jasperserver-pro
+webAppName=jasperserver
 _EOL_
 
   # set the JDBC_DRIVER_VERSION if it is passed in.
@@ -65,7 +65,7 @@ _EOL_
 dbPort=$DB_PORT
 _EOL_
   fi
-  
+
   JRS_DEPLOY_CUSTOMIZATION=${JRS_DEPLOY_CUSTOMIZATION:-${MOUNTS_HOME}/deploy-customization}
 
   if [[ -f "$JRS_DEPLOY_CUSTOMIZATION/default_master_additional.properties" ]]; then
@@ -79,39 +79,39 @@ setup_jasperserver() {
 
   # execute buildomatic js-ant targets for installing/configuring
   # JasperReports Server.
-  
+
   cd ${BUILDOMATIC_HOME}/
-  
+
   for i in $@; do
-    # Default buildomatic deploy-webapp-pro target attempts to remove
-    # $CATALINA_HOME/webapps/jasperserver-pro path.
+    # Default buildomatic deploy-webapp-ce target attempts to remove
+    # $CATALINA_HOME/webapps/jasperserver path.
     # This behaviour does not work if mounted volumes are used.
     # Using unzip to populate webapp directory and non-destructive
     # targets for configuration
-    if [ $i == "deploy-webapp-pro" ]; then
+    if [ $i == "deploy-webapp-ce" ]; then
       ./js-ant \
-        set-pro-webapp-name \
+        set-ce-webapp-name \
         deploy-webapp-datasource-configs \
         deploy-jdbc-jar \
-        -DwarTargetDir=$CATALINA_HOME/webapps/jasperserver-pro
+        -DwarTargetDir=$CATALINA_HOME/webapps/jasperserver
     else
       # warTargetDir webaAppName are set as
       # workaround for database configuration regeneration
       ./js-ant $i \
-        -DwarTargetDir=$CATALINA_HOME/webapps/jasperserver-pro
+        -DwarTargetDir=$CATALINA_HOME/webapps/jasperserver
     fi
   done
 }
 
 run_jasperserver() {
   init_databases
-  
+
   # Because default_master.properties could change on any launch,
-  # always do deploy-webapp-pro.
+  # always do deploy-webapp-ce.
 
-  setup_jasperserver deploy-webapp-pro
+  setup_jasperserver deploy-webapp-ce
 
-  config_license
+  # config_license
 
   # setup phantomjs
   config_phantomjs
@@ -125,21 +125,21 @@ run_jasperserver() {
 
   # Set Java options for Tomcat.
   # using G1GC - default Java GC in later versions of Java 8
-  
+
   # setting heap based on info:
-  # https://medium.com/adorsys/jvm-memory-settings-in-a-container-environment-64b0840e1d9e 
-  # https://stackoverflow.com/questions/49854237/is-xxmaxramfraction-1-safe-for-production-in-a-containered-environment
+  # https://medium.com/adorsys/jvm-memory-settings-in-a-container-environment-64b0840e1d9e
+  # https://stackoverflow.com/questions/49854237/is-xxmaxramfraction-1-safe-for-ceduction-in-a-containered-environment
   # https://www.oracle.com/technetwork/java/javase/8u191-relnotes-5032181.html
-  
+
   # Assuming we are using a Java 8 version beyond 8u191, we can use the Java 10+ JAVA_OPTS
   # for containers
   # Assuming a minimum of 3GB for the container => a max of 2.4GB for heap
   # defaults to 33/3% Min, 80% Max
-  
+
   JAVA_MIN_RAM_PCT=${JAVA_MIN_RAM_PERCENTAGE:-33.3}
   JAVA_MAX_RAM_PCT=${JAVA_MAX_RAM_PERCENTAGE:-80.0}
   JAVA_OPTS="$JAVA_OPTS -XX:-UseContainerSupport -XX:MinRAMPercentage=$JAVA_MIN_RAM_PCT -XX:MaxRAMPercentage=$JAVA_MAX_RAM_PCT"
-  
+
   echo "JAVA_OPTS = $JAVA_OPTS"
   # start tomcat
   exec env JAVA_OPTS="$JAVA_OPTS" catalina.sh run
@@ -170,7 +170,7 @@ config_license() {
 try_database_connection() {
   sawJRSDBName=false
   sawConnectionOK=0
-      
+
   cd ${BUILDOMATIC_HOME}/
 
   while read -r line
@@ -224,19 +224,19 @@ test_database_connection() {
 init_databases() {
 
   test_database_connection
-  
+
   badConnection=false
-  
+
   sawJRSDBName="notyet"
   sawFoodmartDBName="notyet"
   sawSugarCRMDBName="notyet"
-  
+
   sawConnectionOK=0
-  
+
   currentDatabase=""
-  
+
   cd ${BUILDOMATIC_HOME}/
-  
+
   while read -r line
   do
 	if [ -z "$line" ]; then
@@ -278,19 +278,19 @@ init_databases() {
 	    sawConnectionOK=$((sawConnectionOK + 1))
 	fi
   done < <(./js-ant do-pre-install-test)
-  
+
   if [ "$sawConnectionOK" -lt 1 ]; then
 	echo "##### Exiting! ##### saw $sawConnectionOK OK connections, not at least 1"
     exit 1
   fi
-  
+
   echo "Database init status: $DB_NAME : $sawJRSDBName foodmart: $sawFoodmartDBName  sugarcrm $sawSugarCRMDBName"
   if [ "$sawJRSDBName" = "no" ]; then
     echo "Initializing $DB_NAME repository database"
- 	setup_jasperserver set-pro-webapp-name create-js-db init-js-db-pro import-minimal-pro
-  
+ 	setup_jasperserver set-ce-webapp-name create-js-db init-js-db-ce import-minimal-ce
+
 	JRS_LOAD_SAMPLES=${JRS_LOAD_SAMPLES:-false}
-	  
+
 	# Only install the samples if explicitly requested
 	if [ "$1" = "samples" -o "$JRS_LOAD_SAMPLES" = "true" ]; then
 		echo "Samples load requested"
@@ -304,10 +304,10 @@ init_databases() {
 		# if sugarcrm database not present - setup database
 		if [ "$sawSugarCRMDBName" = "no" ]; then
 			setup_jasperserver create-sugarcrm-db \
-							load-sugarcrm-db 
+							load-sugarcrm-db
 		fi
 
-		setup_jasperserver import-sample-data-pro
+		setup_jasperserver import-sample-data-ce
 	fi
   else
     echo "$DB_NAME repository database already exists: not creating and loading"
@@ -320,7 +320,7 @@ config_phantomjs() {
     PATH_PHANTOM='\/usr\/local\/bin\/phantomjs'
     PATTERN1='com.jaspersoft.jasperreports'
     PATTERN2='phantomjs.executable.path'
-    cd $CATALINA_HOME/webapps/jasperserver-pro/WEB-INF
+    cd $CATALINA_HOME/webapps/jasperserver/WEB-INF
     sed -i -r "s/(.*)($PATTERN1.highcharts.$PATTERN2=)(.*)/\2$PATH_PHANTOM/" \
       classes/jasperreports.properties
     sed -i -r "s/(.*)($PATTERN1.fusion.$PATTERN2=)(.*)/\2$PATH_PHANTOM/" \
@@ -347,7 +347,7 @@ config_ports_and_ssl() {
 
   if "$JRS_HTTPS_ONLY" = "true" ; then
     echo "Setting HTTPS only within JasperReports Server"
-    cd $CATALINA_HOME/webapps/jasperserver-pro/WEB-INF
+    cd $CATALINA_HOME/webapps/jasperserver/WEB-INF
     xmlstarlet ed --inplace \
       -N x="http://java.sun.com/xml/ns/j2ee" -u \
       "//x:security-constraint/x:user-data-constraint/x:transport-guarantee"\
@@ -364,7 +364,7 @@ config_ports_and_ssl() {
 
 	  KEYSTORE_PATH_FILES=`find $KEYSTORE_PATH -iname ".keystore*" \
 		-exec readlink -f {} \;`
-	  
+
 	  # update the keystore and password if there
 	  if [[ $KEYSTORE_PATH_FILES -ne 0 ]]; then
 		  # will only be one, if at all
@@ -372,7 +372,7 @@ config_ports_and_ssl() {
 			if [[ -f "$keystore" ]]; then
 			  echo "Deploying Keystore $keystore"
 			  cp "${keystore}" /root
-			  xmlstarlet ed --inplace --subnode "/Server/Service/Connector[@port='${HTTPS_PORT:-8443}']" --type elem \ 
+			  xmlstarlet ed --inplace --subnode "/Server/Service/Connector[@port='${HTTPS_PORT:-8443}']" --type elem \
 					--var connector-ssl '$prev' \
 				--update '$connector-ssl' --type attr -n port -v "${HTTPS_PORT:-8443}" \
 				--update '$connector-ssl' --type attr -n keystoreFile  -v "/root/${keystore}" \
@@ -383,7 +383,7 @@ config_ports_and_ssl() {
 		  done
 	  else
 		  # update existing server.xml. could have been overwritten by customization
-		  # xmlstarlet ed --inplace --subnode "/Server/Service/Connector[@port='${HTTPS_PORT:-8443}']" --type elem \ 
+		  # xmlstarlet ed --inplace --subnode "/Server/Service/Connector[@port='${HTTPS_PORT:-8443}']" --type elem \
 		  #		--var connector-ssl '$prev' \
 		  #	--update '$connector-ssl' --type attr -n port -v "${HTTPS_PORT:-8443}" \
 		  #		--update '$connector-ssl' --type attr -n keystorePass  -v "${KS_PASSWORD}" \
@@ -402,7 +402,7 @@ apply_customizations() {
   # unpack zips (if exist) from path
   # ${MOUNTS_HOME}/customization
   # to JasperReports Server web application path
-  # $CATALINA_HOME/webapps/jasperserver-pro/
+  # $CATALINA_HOME/webapps/jasperserver/
   # file sorted with natural sort
   JRS_CUSTOMIZATION=${JRS_CUSTOMIZATION:-${MOUNTS_HOME}/customization}
   if [ -d "$JRS_CUSTOMIZATION" ]; then
@@ -415,11 +415,11 @@ apply_customizations() {
 		if [[ -f "$customization" ]]; then
 		  echo "Unzipping $customization into JasperReports Server webapp"
 		  unzip -o -q "$customization" \
-			-d $CATALINA_HOME/webapps/jasperserver-pro/
+			-d $CATALINA_HOME/webapps/jasperserver/
 		fi
 	  done
   fi
-  
+
   TOMCAT_CUSTOMIZATION=${TOMCAT_CUSTOMIZATION:-${MOUNTS_HOME}/tomcat-customization}
   if [ -d "$TOMCAT_CUSTOMIZATION" ]; then
 	  echo "Deploying Tomcat Customizations from $TOMCAT_CUSTOMIZATION"
@@ -444,18 +444,18 @@ appServerType=skipAppServerCheck
 _EOL_
 
   # Import from the passed in list of volumes
-  
+
   cd ${BUILDOMATIC_HOME}
-  
+
   for volume in $@; do
       # look for import.properties file in the volume
       if [[ -f "$volume/import.properties" ]]; then
         echo "Importing into JasperReports Server from $volume"
-      
+
         # parse import.properties. each uncommented line with contents will have
         # js-import command line parameters
         # see "Importing from the Command Line" in JasperReports Server Admin guide
-          
+
         while read -r line
         do
           line="$(echo -e "${line}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
@@ -485,7 +485,7 @@ _EOL_
                 fi
                 command="$command $element"
             done
-            
+
             echo "Import $command executing"
             echo "========================="
 
@@ -509,18 +509,18 @@ appServerType=skipAppServerCheck
 _EOL_
 
     # Export from the passed in list of volumes
-    
+
     cd ${BUILDOMATIC_HOME}
-    
+
     for volume in $@; do
         # look for export.properties file in the volume
         if [[ -f "$volume/export.properties" ]]; then
             echo "Exporting into JasperReports Server into $volume"
-        
+
             # parse export.properties. each uncommented line with contents will have
             # js-export command line parameters
             # see "Exporting from the Command Line" in JasperReports Server Admin guide
-            
+
             while read -r line
             do
                 line="$(echo -e "${line}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
@@ -550,7 +550,7 @@ _EOL_
                     fi
                     command="$command $element"
                 done
-            
+
                 echo "Export $command executing"
                 echo "========================="
 
